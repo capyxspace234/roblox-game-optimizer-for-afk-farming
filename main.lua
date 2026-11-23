@@ -1,238 +1,481 @@
--- Roblox AFK Farm Optimizer (Intel Mac compatible)
+-- ═══════════════════════════════════════════════
+--  AFK Optimizer v2 — Liquid Glass UI
+-- ═══════════════════════════════════════════════
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
 local player = Players.LocalPlayer
-local mouse = player:GetMouse()
 
--- State
+-- ─── STATE ───────────────────────────────────
 local state = {
     rendering = false,
     fpsCap = false,
+    fpsValue = 15,
+    shadows = false,
+    lighting = false,
+    fog = false,
+    grass = false,
+    particles = false,
+    postFX = false,
     quality = false,
     terrain = false,
-    textures = false,
-    unfocused = false,
 }
 
--- Core functions
-local function setRendering(enabled)
-    RunService:Set3dRenderingEnabled(not enabled)
+-- ─── CORE FUNCTIONS ──────────────────────────
+local function toggleRendering(on)
+    RunService:Set3dRenderingEnabled(not on)
 end
 
-local function setFps(cap)
-    if cap then
-        setfpscap(1)
+local function setFps(on)
+    if on then
+        setfpscap(state.fpsValue)
     else
         setfpscap(0)
     end
 end
 
-local function setQuality(enabled)
-    if enabled then
-        settings().Rendering.QualityLevel = 1
-    else
-        settings().Rendering.QualityLevel = 9
+local function toggleShadows(on)
+    Lighting.GlobalShadows = not on
+end
+
+local function toggleLighting(on)
+    Lighting.Technology = on and Enum.Technology.FixedFunction or Enum.Technology.Future
+    if on then
+        Lighting.ColorCorrection = nil
+        Lighting:BakeAll()
     end
 end
 
-local function setTerrain(enabled)
+local function toggleFog(on)
+    if on then
+        Lighting.FogEnd = 50
+        Lighting.FogStart = 1
+    else
+        Lighting.FogEnd = 1e9
+        Lighting.FogStart = 0
+    end
+end
+
+local function toggleGrass(on)
     local terrain = workspace:FindFirstChildOfClass("Terrain")
     if terrain then
-        if enabled then
-            terrain.WaterWaveSize = 0
-            terrain.WaterWaveSpeed = 0
-            terrain.WaterReflectance = 0
-            terrain.WaterTransparency = 1
-        else
-            terrain.WaterWaveSize = 1
-            terrain.WaterWaveSpeed = 1
-            terrain.WaterReflectance = 0.5
-            terrain.WaterTransparency = 0
-        end
+        terrain.WaterWaveSize = on and 0 or 1
+        terrain.WaterWaveSpeed = on and 0 or 1
+        terrain.WaterReflectance = on and 0 or 0.5
+    end
+    -- Disable grass via fastflag if available
+    if setfflag then
+        setfflag("DFGrassEnable", on and false or true)
+        setfflag("DFEnableGrass", on and false or true)
     end
 end
 
-local function setTextures(enabled)
-    if enabled then
+local function toggleParticles(on)
+    if on then
         for _, obj in pairs(workspace:GetDescendants()) do
-            if obj:IsA("Decal") or obj:IsA("Texture") then
-                obj:Destroy()
+            if obj:IsA("ParticleEmitter") then
+                obj.Rate = 0
             end
         end
     end
 end
 
--- Unfocused window handler
-local focusedConn
-local function setUnfocused(enabled)
-    if focusedConn then focusedConn:Disconnect() end
-    if enabled then
-        focusedConn = RunService:BindToRenderStep("UnfocusedCheck", Enum.RenderPriority.Last.Value, function()
-            if not game:GetService("GuiService"):GetGuiInset() then return end
-            -- Use window focus check
-            local focused = userinput and userinput:GetFocusedWindow()
-        end)
-        -- Simpler approach: check every 5s
-        task.spawn(function()
-            while state.unfocused do
-                task.wait(5)
-                if not player:FindFirstChild("Mouse") then return end
-                -- Detect if window lost focus via rendering check
-                if not RunService:IsRunning() then return end
-            end
-        end)
-        -- Fallback: just cap FPS low and disable rendering when idle
-        RunService:BindToRenderStep("AFKCheck", Enum.RenderPriority.Last.Value, function()
-            if state.unfocused then
-                RunService:Set3dRenderingEnabled(false)
-            end
-        end)
-    else
-        RunService:Set3dRenderingEnabled(true)
+local function togglePostFX(on)
+    for _, obj in pairs(Lighting:GetChildren()) do
+        if on and (obj:IsA("BloomEffect") or obj:IsA("ColorCorrectionEffect")
+            or obj:IsA("DepthOfFieldEffect") or obj:IsA("SunRaysEffect")
+            or obj:IsA("Atmosphere")) then
+            obj.Enabled = false
+        end
     end
 end
 
--- UI
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "AFKOptimizer"
+local function toggleQuality(on)
+    settings().Rendering.QualityLevel = on and 1 or 9
+    if on then
+        settings().Rendering.Shadows = false
+        settings().Rendering.Lights = false
+    else
+        settings().Rendering.Shadows = true
+        settings().Rendering.Lights = true
+    end
+end
+
+-- ─── UNLOAD ──────────────────────────────────
+local screenGui
+local function unload()
+    -- Restore everything
+    RunService:Set3dRenderingEnabled(true)
+    setfpscap(0)
+    Lighting.GlobalShadows = true
+    Lighting.Technology = Enum.Technology.Future
+    Lighting.FogEnd = 1e9
+    Lighting.FogStart = 0
+    settings().Rendering.QualityLevel = 9
+    settings().Rendering.Shadows = true
+    settings().Rendering.Lights = true
+    for _, obj in pairs(Lighting:GetChildren()) do
+        if obj:IsA("BloomEffect") or obj:IsA("ColorCorrectionEffect")
+            or obj:IsA("DepthOfFieldEffect") or obj:IsA("SunRaysEffect")
+            or obj:IsA("Atmosphere") then
+            obj.Enabled = true
+        end
+    end
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if obj:IsA("ParticleEmitter") then
+            obj.Rate = 30
+        end
+    end
+    if screenGui then screenGui:Destroy() end
+end
+
+-- ─── UI ──────────────────────────────────────
+screenGui = Instance.new("ScreenGui")
+screenGui.Name = "AFKOptimizerV2"
 screenGui.ResetOnSpawn = false
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = player:WaitForChild("PlayerGui")
 
-local frame = Instance.new("Frame")
-frame.Name = "MainFrame"
-frame.Size = UDim2.new(0, 220, 0, 280)
-frame.Position = UDim2.new(1, -230, 0, 50)
-frame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-frame.BackgroundTransparency = 0.1
-frame.BorderSizePixel = 0
-frame.Parent = screenGui
+-- Main container (liquid glass)
+local main = Instance.new("Frame")
+main.Name = "Main"
+main.Size = UDim2.new(0, 260, 0, 420)
+main.Position = UDim2.new(1, -270, 0.5, -210)
+main.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+main.BackgroundTransparency = 0.35
+main.BorderSizePixel = 0
+main.Parent = screenGui
 
-local corner = Instance.new("UICorner")
-corner.CornerRadius = UDim.new(0, 8)
-corner.Parent = frame
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 20)
+mainCorner.Parent = main
 
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Color = Color3.fromRGB(255, 255, 255)
+mainStroke.Transparency = 0.7
+mainStroke.Thickness = 1
+mainStroke.Parent = main
+
+local mainBlur = Instance.new("UIGradient")
+mainBlur.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(40, 40, 55)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 20, 30)),
+})
+mainBlur.Rotation = 90
+mainBlur.Parent = main
+
+-- Title
 local title = Instance.new("TextLabel")
-title.Name = "Title"
-title.Size = UDim2.new(1, 0, 0, 30)
+title.Size = UDim2.new(1, 0, 0, 40)
 title.BackgroundTransparency = 1
-title.Text = "⚙ AFK Optimizer"
+title.Text = "AFK Optimizer"
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
 title.Font = Enum.Font.GothamBold
-title.TextSize = 14
-title.Parent = frame
+title.TextSize = 18
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Position = UDim2.new(0, 20, 0, 10)
+title.Parent = main
+
+local subtitle = Instance.new("TextLabel")
+subtitle.Size = UDim2.new(1, 0, 0, 16)
+subtitle.BackgroundTransparency = 1
+subtitle.Text = "Liquid Glass Edition"
+subtitle.TextColor3 = Color3.fromRGB(150, 150, 170)
+subtitle.Font = Enum.Font.Gotham
+subtitle.TextSize = 11
+subtitle.TextXAlignment = Enum.TextXAlignment.Left
+subtitle.Position = UDim2.new(0, 20, 0, 32)
+subtitle.Parent = main
+
+-- Divider
+local divider = Instance.new("Frame")
+divider.Size = UDim2.new(1, -40, 0, 1)
+divider.Position = UDim2.new(0, 20, 0, 52)
+divider.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+divider.BackgroundTransparency = 0.8
+divider.Parent = main
+
+-- Scrollable content
+local scroll = Instance.new("ScrollingFrame")
+scroll.Size = UDim2.new(1, -20, 1, -80)
+scroll.Position = UDim2.new(0, 10, 0, 60)
+scroll.BackgroundTransparency = 1
+scroll.BorderSizePixel = 0
+scroll.ScrollBarThickness = 3
+scroll.ScrollBarImageColor3 = Color3.fromRGB(255, 255, 255)
+scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scroll.Parent = main
+
+local scrollCorner = Instance.new("UICorner")
+scrollCorner.Parent = scroll
 
 local list = Instance.new("UIListLayout")
-list.Padding = UDim.new(0, 4)
-list.HorizontalAlignment = Enum.HorizontalAlignment.Center
-list.Parent = frame
+list.Padding = UDim.new(0, 6)
+list.Parent = scroll
 
-local pad = Instance.new("UIPadding")
-pad.PaddingTop = UDim.new(0, 34)
-pad.PaddingLeft = UDim.new(0, 10)
-pad.PaddingRight = UDim.new(0, 10)
-pad.Parent = frame
+-- ─── TOGGLE BUILDER ─────────────────────────
+local function makeToggle(label, key, onToggle, icon)
+    local container = Instance.new("Frame")
+    container.Size = UDim2.new(1, 0, 0, 40)
+    container.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    container.BackgroundTransparency = 0.92
+    container.Parent = scroll
 
-local toggles = {}
+    local cCorner = Instance.new("UICorner")
+    cCorner.CornerRadius = UDim.new(0, 12)
+    cCorner.Parent = container
 
-local function makeToggle(label, key, onToggle)
-    local btn = Instance.new("TextButton")
-    btn.Name = key
-    btn.Size = UDim2.new(1, 0, 0, 32)
-    btn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
-    btn.Text = label .. "  [OFF]"
-    btn.TextColor3 = Color3.fromRGB(180, 180, 180)
-    btn.Font = Enum.Font.Gotham
-    btn.TextSize = 12
-    btn.AutoButtonColor = true
-    btn.Parent = frame
+    local cStroke = Instance.new("UIStroke")
+    cStroke.Color = Color3.fromRGB(255, 255, 255)
+    cStroke.Transparency = 0.85
+    cStroke.Thickness = 0.5
+    cStroke.Parent = container
 
-    local bc = Instance.new("UICorner")
-    bc.CornerRadius = UDim.new(0, 6)
-    bc.Parent = btn
+    local labelFrame = Instance.new("TextLabel")
+    labelFrame.Size = UDim2.new(1, -50, 1, 0)
+    labelFrame.Position = UDim2.new(0, 14, 0, 0)
+    labelFrame.BackgroundTransparency = 1
+    labelFrame.Text = (icon and icon .. "  " or "") .. label
+    labelFrame.TextColor3 = Color3.fromRGB(220, 220, 230)
+    labelFrame.Font = Enum.Font.Gotham
+    labelFrame.TextSize = 13
+    labelFrame.TextXAlignment = Enum.TextXAlignment.Left
+    labelFrame.Parent = container
 
-    btn.MouseButton1Click:Connect(function()
+    -- Toggle switch (pill shape)
+    local toggle = Instance.new("Frame")
+    toggle.Size = UDim2.new(0, 40, 0, 22)
+    toggle.Position = UDim2.new(1, -48, 0.5, -11)
+    toggle.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+    toggle.BackgroundTransparency = 0.3
+    toggle.Parent = container
+
+    local tCorner = Instance.new("UICorner")
+    tCorner.CornerRadius = UDim.new(1, 0)
+    tCorner.Parent = toggle
+
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.new(0, 18, 0, 18)
+    knob.Position = UDim2.new(0, 2, 0.5, -9)
+    knob.BackgroundColor3 = Color3.fromRGB(200, 200, 210)
+    knob.Parent = toggle
+
+    local knobCorner = Instance.new("UICorner")
+    knobCorner.CornerRadius = UDim.new(1, 0)
+    knobCorner.Parent = knob
+
+    local function updateToggle(on)
+        toggle.BackgroundColor3 = on and Color3.fromRGB(48, 167, 107) or Color3.fromRGB(60, 60, 70)
+        toggle.BackgroundTransparency = on and 0.1 or 0.3
+        knob.Position = on and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
+        knob.BackgroundColor3 = on and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(200, 200, 210)
+        labelFrame.TextColor3 = on and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(220, 220, 230)
+    end
+
+    updateToggle(state[key])
+
+    local clickArea = Instance.new("TextButton")
+    clickArea.Size = UDim2.new(1, 0, 1, 0)
+    clickArea.BackgroundTransparency = 1
+    clickArea.Text = ""
+    clickArea.AutoButtonColor = false
+    clickArea.Parent = container
+
+    clickArea.MouseButton1Click:Connect(function()
         state[key] = not state[key]
         onToggle(state[key])
-        btn.Text = label .. (state[key] and "  [ON]" or "  [OFF]")
-        btn.BackgroundColor3 = state[key] and Color3.fromRGB(40, 80, 50) or Color3.fromRGB(35, 35, 45)
-        btn.TextColor3 = state[key] and Color3.fromRGB(120, 255, 120) or Color3.fromRGB(180, 180, 180)
+        updateToggle(state[key])
     end)
 
-    toggles[key] = btn
-    return btn
+    return container
 end
 
-makeToggle("3D Rendering", "rendering", function(on)
-    setRendering(on)
-end)
+-- ─── FPS SLIDER ──────────────────────────────
+local fpsContainer = Instance.new("Frame")
+fpsContainer.Size = UDim2.new(1, 0, 0, 56)
+fpsContainer.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+fpsContainer.BackgroundTransparency = 0.92
+fpsContainer.Parent = scroll
 
-makeToggle("FPS Cap (1)", "fpsCap", function(on)
-    setFps(on)
-end)
+local fcCorner = Instance.new("UICorner")
+fcCorner.CornerRadius = UDim.new(0, 12)
+fcCorner.Parent = fpsContainer
 
-makeToggle("Quality Level 1", "quality", function(on)
-    setQuality(on)
-end)
+local fcStroke = Instance.new("UIStroke")
+fcStroke.Color = Color3.fromRGB(255, 255, 255)
+fcStroke.Transparency = 0.85
+fcStroke.Thickness = 0.5
+fcStroke.Parent = fpsContainer
 
-makeToggle("Terrain Opt", "terrain", function(on)
-    setTerrain(on)
-end)
+local fpsLabel = Instance.new("TextLabel")
+fpsLabel.Size = UDim2.new(1, -20, 0, 18)
+fpsLabel.Position = UDim2.new(0, 14, 0, 6)
+fpsLabel.BackgroundTransparency = 1
+fpsLabel.Text = "🎮  FPS Cap"
+fpsLabel.TextColor3 = Color3.fromRGB(220, 220, 230)
+fpsLabel.Font = Enum.Font.Gotham
+fpsLabel.TextSize = 13
+fpsLabel.TextXAlignment = Enum.TextXAlignment.Left
+fpsLabel.Parent = fpsContainer
 
-makeToggle("Remove Textures", "textures", function(on)
-    setTextures(on)
-end)
+local fpsValueLabel = Instance.new("TextLabel")
+fpsValueLabel.Size = UDim2.new(0, 40, 0, 18)
+fpsValueLabel.Position = UDim2.new(1, -50, 0, 6)
+fpsValueLabel.BackgroundTransparency = 1
+fpsValueLabel.Text = tostring(state.fpsValue) .. " fps"
+fpsValueLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
+fpsValueLabel.Font = Enum.Font.GothamMedium
+fpsValueLabel.TextSize = 12
+fpsValueLabel.TextXAlignment = Enum.TextXAlignment.Right
+fpsValueLabel.Parent = fpsContainer
 
-makeToggle("Unfocused Mode", "unfocused", function(on)
-    setUnfocused(on)
-end)
+local slider = Instance.new("TextButton")
+slider.Size = UDim2.new(1, -28, 0, 8)
+slider.Position = UDim2.new(0, 14, 0, 32)
+slider.BackgroundColor3 = Color3.fromRGB(50, 50, 65)
+slider.Text = ""
+slider.AutoButtonColor = false
+slider.Parent = fpsContainer
 
--- Close button
-local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(1, 0, 0, 24)
-closeBtn.BackgroundColor3 = Color3.fromRGB(60, 30, 30)
-closeBtn.Text = "✕ Close"
-closeBtn.TextColor3 = Color3.fromRGB(200, 100, 100)
-closeBtn.Font = Enum.Font.Gotham
-closeBtn.TextSize = 11
-closeBtn.Parent = frame
+local sliderCorner = Instance.new("UICorner")
+sliderCorner.CornerRadius = UDim.new(1, 0)
+sliderCorner.Parent = slider
 
-local cc = Instance.new("UICorner")
-cc.CornerRadius = UDim.new(0, 6)
-cc.Parent = closeBtn
+local sliderFill = Instance.new("Frame")
+sliderFill.Size = UDim2.new(0.25, 0, 1, 0)
+sliderFill.BackgroundColor3 = Color3.fromRGB(100, 180, 255)
+sliderFill.BackgroundTransparency = 0.2
+sliderFill.Parent = slider
 
-closeBtn.MouseButton1Click:Connect(function()
-    screenGui:Destroy()
-end)
+local sliderFillCorner = Instance.new("UICorner")
+sliderFillCorner.CornerRadius = UDim.new(1, 0)
+sliderFillCorner.Parent = sliderFill
 
--- Drag
-local dragging
-local dragInput
-local dragStart, startPos
+local dragging = false
+local function updateSlider(pos)
+    local rel = math.clamp((pos - slider.AbsolutePosition.X) / slider.AbsoluteSize.X, 0, 1)
+    local val = math.floor(rel * 59) + 1 -- 1 to 60
+    state.fpsValue = val
+    fpsValueLabel.Text = val .. " fps"
+    sliderFill.Size = UDim2.new(rel, 0, 1, 0)
+    if state.fpsCap then setfpscap(val) end
+end
 
-frame.InputBegan:Connect(function(input)
+slider.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         dragging = true
-        dragStart = input.Position
-        startPos = frame.Position
+        updateSlider(input.Position.X)
     end
 end)
-
-frame.InputEnded:Connect(function(input)
+game:GetService("UserInputService").InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        updateSlider(input.Position.X)
+    end
+end)
+game:GetService("UserInputService").InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         dragging = false
     end
 end)
 
+local fpsToggle = Instance.new("TextButton")
+fpsToggle.Size = UDim2.new(0, 40, 0, 22)
+fpsToggle.Position = UDim2.new(1, -52, 0, 6)
+fpsToggle.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+fpsToggle.Text = ""
+fpsToggle.AutoButtonColor = true
+fpsToggle.Parent = fpsContainer
+local ftc = Instance.new("UICorner")
+ftc.CornerRadius = UDim.new(1, 0)
+ftc.Parent = fpsToggle
+
+local fpsKnob = Instance.new("Frame")
+fpsKnob.Size = UDim2.new(0, 18, 0, 18)
+fpsKnob.Position = UDim2.new(0, 2, 0.5, -9)
+fpsKnob.BackgroundColor3 = Color3.fromRGB(200, 200, 210)
+fpsKnob.Parent = fpsToggle
+local fkc = Instance.new("UICorner")
+fkc.CornerRadius = UDim.new(1, 0)
+fkc.Parent = fpsKnob
+
+fpsToggle.MouseButton1Click:Connect(function()
+    state.fpsCap = not state.fpsCap
+    setFps(state.fpsCap)
+    fpsToggle.BackgroundColor3 = state.fpsCap and Color3.fromRGB(48, 167, 107) or Color3.fromRGB(60, 60, 70)
+    fpsKnob.Position = state.fpsCap and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
+end)
+
+-- ─── ADD TOGGLES ─────────────────────────────
+makeToggle("3D Rendering", "rendering", toggleRendering, "🖥️")
+makeToggle("Quality Level 1", "quality", toggleQuality, "⚡")
+makeToggle("Shadows", "shadows", toggleShadows, "🌑")
+makeToggle("Lighting (Fixed)", "lighting", toggleLighting, "💡")
+makeToggle("Fog", "fog", toggleFog, "🌫️")
+makeToggle("Grass & Water", "grass", toggleGrass, "🌿")
+makeToggle("Particles", "particles", toggleParticles, "✨")
+makeToggle("Post-Processing FX", "postFX", togglePostFX, "🎨")
+makeToggle("Terrain Optimize", "terrain", function(on)
+    local t = workspace:FindFirstChildOfClass("Terrain")
+    if t then
+        t.WaterWaveSize = on and 0 or 1
+        t.WaterWaveSpeed = on and 0 or 1
+        t.WaterReflectance = on and 0 or 0.5
+        t.WaterTransparency = on and 1 or 0
+    end
+end, "🏔️")
+
+-- ─── UNLOAD BUTTON ───────────────────────────
+local unloadBtn = Instance.new("TextButton")
+unloadBtn.Size = UDim2.new(1, -40, 0, 36)
+unloadBtn.Position = UDim2.new(0, 20, 1, -46)
+unloadBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+unloadBtn.BackgroundTransparency = 0.2
+unloadBtn.Text = "  Unload & Restore All"
+unloadBtn.TextColor3 = Color3.fromRGB(255, 220, 220)
+unloadBtn.Font = Enum.Font.GothamMedium
+unloadBtn.TextSize = 13
+unloadBtn.Parent = main
+
+local ubCorner = Instance.new("UICorner")
+ubCorner.CornerRadius = UDim.new(0, 12)
+ubCorner.Parent = unloadBtn
+
+local ubStroke = Instance.new("UIStroke")
+ubStroke.Color = Color3.fromRGB(255, 100, 100)
+ubStroke.Transparency = 0.6
+ubStroke.Thickness = 1
+ubStroke.Parent = unloadBtn
+
+unloadBtn.MouseButton1Click:Connect(unload)
+
+-- ─── DRAG ────────────────────────────────────
+local isDragging, dragStart, startPos
+main.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isDragging = true
+        dragStart = input.Position
+        startPos = main.Position
+    end
+end)
+main.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        isDragging = false
+    end
+end)
+local dragInput
 game:GetService("UserInputService").InputChanged:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseMovement then
         dragInput = input
     end
 end)
-
-game:GetService("RunService").RenderStepped:Connect(function()
-    if dragging and dragInput then
+RunService:RenderStepped:Connect(function()
+    if isDragging and dragInput then
         local delta = dragInput.Position - dragStart
-        frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
-                                   startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y)
     end
-end)   
+end)
+
+print("[AFK Optimizer v2] Loaded ✓")   
